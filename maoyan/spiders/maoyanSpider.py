@@ -64,20 +64,109 @@ class MaoyanspiderSpider(scrapy.Spider):
             item['b_currentTime'] = datetime.datetime.now()
             yield item
 
-        # all_movie = response.css('ul[class="row"]')
-        # # all_movie = response.xpath('//dl=[@class="movie-list"]')
-        # # 这个是用css选择器获取到，效果和xpath是一样的
-        # for movie in all_movie:
-        #     item = MaoyanItem()  # 实例化item
-        #     item['b_ranking'] = response.css('li[class="col0"]::text').extract()[0]
-        #     item['b_movie'] = response.css('li[class="col1"] p[class="first-line"]::text').extract()[0]
-        #     item['b_time'] = response.css('li[class="col1"] p[class="second-line"]::text').extract()[0]
-        #     item['b_time'] = response.css('li[class="col2 tr"]::text').extract()[0] + '万'
-        #     item['b_average_price'] = response.css('li[class="col3 tr"]::text').extract()[0]
-        #     item['b_average_people'] = response.css('li[class="col4 tr"]::text').extract()[0]
-        #     item['b_deadline'] = datetime.datetime.now().strftime('%Y-%m-%d')
 
 
+
+
+
+    def parse2(self, response):  # 解析函数，用来解析返回的结果，提取数据
+        # response对象里面scrapy已经封装好了xpath、css方法，可以直接用
+        # xpath就是写xpath，css就是写css选择器，返回的都是一个list
+        # 这个是用xpath获取页面上所有的电影
+
+        # 下面是css选择器
+        # all_movie = response.css('dl.board-wrapper dd')
+        all_movie = response.css('dd')
+        # all_movie = response.xpath('//dl=[@class="movie-list"]')
+        # 这个是用css选择器获取到，效果和xpath是一样的
+        for movie in all_movie:
+            item = MaoyanItem()  # 实例化item
+            item['movie_name'] = movie.css('div[class="channel-detail movie-item-title"] a::text').extract()[0]
+            #item['posters'] = movie.css('img[class="board-img"]::attr(data-src)').extract_first()  # 电影海报url
+            #item['star'] = movie.css('p[class="star"]::text').extract_first().strip()  # 主演
+            #item['release_time'] = movie.css('p[class="releasetime"]::text').extract_first().strip()  # 发布时间
+            # 获取评分信息
+            score_integer = movie.css('div[class="channel-detail channel-detail-orange"] i[class="integer"]::text').extract()[0]
+            score_fraction = movie.css('div[class="channel-detail channel-detail-orange"] i[class="fraction"]::text').extract()[0]
+            # score0 = movie.css('div[class="channel-detail channel-detail-orange"]::text').extract()[0]
+            score = score_integer + score_fraction
+            item['score'] = "".join(score)
+            # # 处理存在评分和暂无评分的两种情况
+            # if score0 != "":
+            #     item['score'] = score0
+            #     print(11)
+            #     # print(score[0])
+            # else:
+            #     score = score_integer + score_fraction
+            #     item['score'] = "".join(score)
+            #     # ("score=" + score)
+
+            item['url'] = self.base_url + movie.css('div[class="channel-detail movie-item-title"] a::attr(href)').extract()[0]
+            item['movie_id'] = movie.css('div[class="channel-detail movie-item-title"] a::attr(href)').extract()[0].split('/')[-1]
+            print(dict(item))
+            yield scrapy.Request(item['url'], meta={'item': item}, callback=self.detail_parse)
+            # yield item
+    def detail_parse(self,response):
+        # 接收上级已爬取的数据
+        item = response.meta['item']
+        # 一级内页数据提取
+        # 电影介绍
+        font_link = re.findall(r'vfile.meituan.net/colorstone/(\w+\.woff)',
+                              response.text)[0]
+        self.get_font(font_link)
+        bo = response.css('div[class="movie-index-content box"] span[class="no-info"]::text').extract()
+        if bo:
+            item['c_box'] = '暂无'
+        else:
+            box = response.css('div[class="movie-index-content box"] span[class="stonefont"]::text').extract()[0]
+            box_unit = response.css('div[class="movie-index-content box"] span[class="unit"]::text').extract()[0]
+            box = self.modify_data(box)
+            item['c_box'] = box + box_unit
+        item['director'] = response.css('li[class="celebrity "] div[class="info"] a::text').extract()[0].split()[0]
+        all_actor = response.css('li[class="celebrity actor"]')[:3]
+        actor0 = ''
+        for actor in all_actor:
+            actor1 = actor.css('div[class="info"] a::text').extract()[0].split()[0]
+            # role1 = actor.css('div[class="info"] span[class="role"]::text').extract()[0].split()[0]
+            actor0 = actor0 + actor1 + ' '
+        item['actor'] = actor0
+        item['intro'] = response.css('div[class="mod-content"] span[class="dra"]::text').extract()[0]
+        item['time'] = response.css('div[class="movie-brief-container"] ul li[class="ellipsis"]::text').extract()[-1]
+        item['country'] = response.css('div[class="movie-brief-container"] ul li[class="ellipsis"]::text').extract()[1].split('\n')[1].strip()
+        item['duration'] = response.css('div[class="movie-brief-container"] ul li[class="ellipsis"]::text').extract()[1].split('\n')[2].split('/')[1].strip()
+        item['type'] = response.css('div[class="movie-brief-container"] ul li[class="ellipsis"]::text').extract()[0]
+        return item
+        # item['yaoqiu'] = response.xpath("//*[@id='position_detail']/div/table/tr[4]/td/ul[1]").xpath('string(.)').extract()[0]
+        # 二级内页地址爬取
+        # yield scrapy.Request(item['url'] + "&123", meta={'item': item}, callback=self.detail_parse2)
+        # 有下级页面爬取 注释掉数据返回
+        # return item
+
+    def detail_parse2(self, response):
+        # 接收上级已爬取的数据
+        # item = response.meta['item']
+        all_comment = response.css('div[class="comment-list-container"] ul li[class="comment-container "]')
+        c_movie = response.css('div[class="movie-brief-container"] h3[class="name"]::text').extract()[0]
+        # all_movie = response.xpath('//dl=[@class="movie-list"]')
+        # 这个是用css选择器获取到，效果和xpath是一样的
+        for comment in all_comment:
+            item = MaoyanItem()  # 实例化item
+            item['c_user'] = comment.css('div[class="user"] span[class="name"]::text').extract()[0]
+            item['c_movie'] = c_movie
+
+            item['c_comment'] = comment.css('div[class="comment-content"]::text').extract()[0]
+            item['c_good'] = comment.css('div[class="approve "] span[class="num"]::text').extract()[0]
+            item['c_time'] = comment.css('div[class="time"]::attr(title)').extract()[0]
+            font_link = re.findall(r'vfile.meituan.net/colorstone/(\w+\.woff)',
+                                   response.text)[0]
+            self.get_font(font_link)
+            box = response.css('div[class="movie-index-content box"] span[class="stonefont"]::text').extract()[0]
+            box_unit = response.css('div[class="movie-index-content box"] span[class="unit"]::text').extract()[0]
+            box = self.modify_data(box)
+            item['c_box'] = box + box_unit
+            yield item
+
+    # 用来识别字体
     def download_font(self, link):
         download_link = 'http://vfile.meituan.net/colorstone/' + link
         woff = requests.get(download_link)
@@ -129,99 +218,3 @@ class MaoyanspiderSpider(scrapy.Spider):
                 if dic == attr_dic:
                     translate_form[name] = num
         return translate_form
-
-    # def parse(self, response):  # 解析函数，用来解析返回的结果，提取数据
-    #     # response对象里面scrapy已经封装好了xpath、css方法，可以直接用
-    #     # xpath就是写xpath，css就是写css选择器，返回的都是一个list
-    #     # 这个是用xpath获取页面上所有的电影
-    #
-    #     # 下面是css选择器
-    #     # all_movie = response.css('dl.board-wrapper dd')
-    #     all_movie = response.css('dd')
-    #     # all_movie = response.xpath('//dl=[@class="movie-list"]')
-    #     # 这个是用css选择器获取到，效果和xpath是一样的
-    #     for movie in all_movie:
-    #         item = MaoyanItem()  # 实例化item
-    #         item['movie_name'] = movie.css('div[class="channel-detail movie-item-title"] a::text').extract()[0]
-    #         #item['posters'] = movie.css('img[class="board-img"]::attr(data-src)').extract_first()  # 电影海报url
-    #         #item['star'] = movie.css('p[class="star"]::text').extract_first().strip()  # 主演
-    #         #item['release_time'] = movie.css('p[class="releasetime"]::text').extract_first().strip()  # 发布时间
-    #         # 获取评分信息
-    #         score_integer = movie.css('div[class="channel-detail channel-detail-orange"] i[class="integer"]::text').extract()[0]
-    #         score_fraction = movie.css('div[class="channel-detail channel-detail-orange"] i[class="fraction"]::text').extract()[0]
-    #         # score0 = movie.css('div[class="channel-detail channel-detail-orange"]::text').extract()[0]
-    #         score = score_integer + score_fraction
-    #         item['score'] = "".join(score)
-    #         # # 处理存在评分和暂无评分的两种情况
-    #         # if score0 != "":
-    #         #     item['score'] = score0
-    #         #     print(11)
-    #         #     # print(score[0])
-    #         # else:
-    #         #     score = score_integer + score_fraction
-    #         #     item['score'] = "".join(score)
-    #         #     # ("score=" + score)
-    #
-    #         item['url'] = self.base_url + movie.css('div[class="channel-detail movie-item-title"] a::attr(href)').extract()[0]
-    #         item['movie_id'] = movie.css('div[class="channel-detail movie-item-title"] a::attr(href)').extract()[0].split('/')[-1]
-    #         print(dict(item))
-    #         yield scrapy.Request(item['url'], meta={'item': item}, callback=self.detail_parse)
-    #         # yield item
-    def detail_parse(self,response):
-        # 接收上级已爬取的数据
-        item = response.meta['item']
-        # 一级内页数据提取
-        # 电影介绍
-        font_link = re.findall(r'vfile.meituan.net/colorstone/(\w+\.woff)',
-                              response.text)[0]
-        self.get_font(font_link)
-        bo = response.css('div[class="movie-index-content box"] span[class="no-info"]::text').extract()
-        if bo:
-            item['c_box'] = '暂无'
-        else:
-            box = response.css('div[class="movie-index-content box"] span[class="stonefont"]::text').extract()[0]
-            box_unit = response.css('div[class="movie-index-content box"] span[class="unit"]::text').extract()[0]
-            box = self.modify_data(box)
-            item['c_box'] = box + box_unit
-        item['director'] = response.css('li[class="celebrity "] div[class="info"] a::text').extract()[0].split()[0]
-        all_actor = response.css('li[class="celebrity actor"]')[:3]
-        actor0 = ''
-        for actor in all_actor:
-            actor1 = actor.css('div[class="info"] a::text').extract()[0].split()[0]
-            # role1 = actor.css('div[class="info"] span[class="role"]::text').extract()[0].split()[0]
-            actor0 = actor0 + actor1 + ' '
-        item['actor'] = actor0
-        item['intro'] = response.css('div[class="mod-content"] span[class="dra"]::text').extract()[0]
-        item['time'] = response.css('div[class="movie-brief-container"] ul li[class="ellipsis"]::text').extract()[-1]
-        item['country'] = response.css('div[class="movie-brief-container"] ul li[class="ellipsis"]::text').extract()[1].split('\n')[1].strip()
-        item['duration'] = response.css('div[class="movie-brief-container"] ul li[class="ellipsis"]::text').extract()[1].split('\n')[2].split('/')[1].strip()
-        item['type'] = response.css('div[class="movie-brief-container"] ul li[class="ellipsis"]::text').extract()[0]
-        return item
-        # item['yaoqiu'] = response.xpath("//*[@id='position_detail']/div/table/tr[4]/td/ul[1]").xpath('string(.)').extract()[0]
-        # 二级内页地址爬取
-        # yield scrapy.Request(item['url'] + "&123", meta={'item': item}, callback=self.detail_parse2)
-        # 有下级页面爬取 注释掉数据返回
-        # return item
-    # def detail_parse(self, response):
-    #     # 接收上级已爬取的数据
-    #     # item = response.meta['item']
-    #     all_comment = response.css('div[class="comment-list-container"] ul li[class="comment-container "]')
-    #     c_movie = response.css('div[class="movie-brief-container"] h3[class="name"]::text').extract()[0]
-    #     # all_movie = response.xpath('//dl=[@class="movie-list"]')
-    #     # 这个是用css选择器获取到，效果和xpath是一样的
-    #     for comment in all_comment:
-    #         item = MaoyanItem()  # 实例化item
-    #         item['c_user'] = comment.css('div[class="user"] span[class="name"]::text').extract()[0]
-    #         item['c_movie'] = c_movie
-    #
-    #         item['c_comment'] = comment.css('div[class="comment-content"]::text').extract()[0]
-    #         item['c_good'] = comment.css('div[class="approve "] span[class="num"]::text').extract()[0]
-    #         item['c_time'] = comment.css('div[class="time"]::attr(title)').extract()[0]
-    #         font_link = re.findall(r'vfile.meituan.net/colorstone/(\w+\.woff)',
-    #                                response.text)[0]
-    #         self.get_font(font_link)
-    #         box = response.css('div[class="movie-index-content box"] span[class="stonefont"]::text').extract()[0]
-    #         box_unit = response.css('div[class="movie-index-content box"] span[class="unit"]::text').extract()[0]
-    #         box = self.modify_data(box)
-    #         item['c_box'] = box + box_unit
-    #         yield item

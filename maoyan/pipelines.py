@@ -17,8 +17,6 @@ class MaoyanPipeline(object):
         # with open(fiename, 'a', encoding='utf-8') as f:
         #     f.write(item['b_movieName'] + '\n')
         #     f.write(item['b_boxInfo'] + '\n')
-
-
         db.insertBox(item)
         return item
 
